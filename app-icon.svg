@@ -1,0 +1,35 @@
+<svg width="512" height="512" viewBox="0 0 512 512" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <g transform="translate(25.6 25.6) scale(0.9)">
+    <rect width="512" height="512" rx="112" fill="#F8FAFD"/>
+    <rect x="44" y="44" width="424" height="424" rx="92" fill="#FFFFFF"/>
+    <rect x="64" y="64" width="384" height="384" rx="82" stroke="#E5EAF2" stroke-width="8"/>
+
+    <path
+      d="M256 90L376 138V232C376 312 328 381 256 414C184 381 136 312 136 232V138L256 90Z"
+      fill="#007AFF"
+    />
+    <path
+      d="M256 126L342 160V232C342 292 309 344 256 374C203 344 170 292 170 232V160L256 126Z"
+      fill="#EAF4FF"
+    />
+    <path
+      d="M256 126L342 160V232C342 292 309 344 256 374V126Z"
+      fill="#D8ECFF"
+    />
+
+    <path
+      d="M210 254L244 288L315 214"
+      stroke="#007AFF"
+      stroke-width="34"
+      stroke-linecap="round"
+      stroke-linejoin="round"
+    />
+
+    <path
+      d="M190 354C220 377 244 391 256 396C268 391 292 377 322 354"
+      stroke="#007AFF"
+      stroke-width="20"
+      stroke-linecap="round"
+    />
+  </g>
+</svg>

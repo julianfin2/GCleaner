@@ -1,0 +1,49 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "GCleaner",
+  "version": "0.1.0",
+  "mainBinaryName": "GCleaner",
+  "identifier": "top.volan.gcleaner",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "谷歌账号清理器 v0.1.0",
+        "width": 1300,
+        "height": 850
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": [
+      "msi",
+      "app",
+      "dmg"
+    ],
+    "windows": {
+      "wix": {
+        "language": "zh-CN"
+      }
+    },
+    "publisher": "Julian F.",
+    "copyright": "Licensed under the MIT License.",
+    "shortDescription": "批量清理 Google 账号数据的桌面工具。",
+    "longDescription": "GCleaner 是一个用于批量清理 Google 账号数据的桌面工具，支持清理云端硬盘文件、共享权限、Gmail 文件线索邮件、通讯录联系人以及 Google Tasks 任务和任务列表。",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/128x128@2x.png",
+      "icons/icon.icns",
+      "icons/icon.ico"
+    ]
+  }
+}
