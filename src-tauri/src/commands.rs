@@ -26,6 +26,8 @@ use crate::tokens::{
     import_access_tokens, list_authorized_accounts,
 };
 
+use crate::auth::google_client;
+
 const WRITE_REQUEST_INTERVAL_MS: u64 = 200;
 
 async fn throttle_write_request() {
@@ -155,7 +157,7 @@ async fn delete_files(
 
     let mut failures = Vec::new();
     for (account, files_to_clean) in account_groups {
-        let client = reqwest::Client::new();
+        let client = google_client().map_err(|e| e.to_string())?;
         let token = match get_valid_access_token(&tokens_dir, &account) {
             Ok(token) => token,
             Err(e) => {
@@ -270,7 +272,7 @@ async fn remove_shared_permissions(
 
     let mut failures = Vec::new();
     for (account, files_to_clean) in account_groups {
-        let client = reqwest::Client::new();
+        let client = google_client().map_err(|e| e.to_string())?;
         let token = match get_valid_access_token(&tokens_dir, &account) {
             Ok(token) => token,
             Err(e) => {
@@ -401,7 +403,7 @@ async fn cleanup_mail_candidates(
     let mut trashed_messages = 0usize;
 
     for (account, candidates_to_clean) in account_groups {
-        let client = reqwest::Client::new();
+        let client = google_client().map_err(|e| e.to_string())?;
         let token = match get_valid_access_token(&tokens_dir, &account) {
             Ok(token) => token,
             Err(e) => {
@@ -566,7 +568,7 @@ async fn delete_contacts_cleanup(
     let mut failures = Vec::new();
     let mut deleted_count = 0usize;
     for (account, contacts_to_delete) in account_groups {
-        let client = reqwest::Client::new();
+        let client = google_client().map_err(|e| e.to_string())?;
         let token = match get_valid_access_token(&tokens_dir, &account) {
             Ok(token) => token,
             Err(e) => {
@@ -650,7 +652,7 @@ async fn delete_contact_groups_cleanup(
     let mut failures = Vec::new();
     let mut deleted_count = 0usize;
     for (account, groups_to_delete) in account_groups {
-        let client = reqwest::Client::new();
+        let client = google_client().map_err(|e| e.to_string())?;
         let token = match get_valid_access_token(&tokens_dir, &account) {
             Ok(token) => token,
             Err(e) => {
@@ -761,7 +763,7 @@ async fn cleanup_tasks(
 
     let mut failures = Vec::new();
     for (account, items_to_clean) in account_groups {
-        let client = reqwest::Client::new();
+        let client = google_client().map_err(|e| e.to_string())?;
         let token = match get_valid_access_token(&tokens_dir, &account) {
             Ok(token) => token,
             Err(e) => {

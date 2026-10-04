@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckCircle2, ListChecks, Loader2, RefreshCw, ShieldAlert, Trash2 } from "lucide-vue-next";
+import { CheckCircle2, ListChecks, Loader2, RefreshCw, ShieldAlert, Trash2 } from "@lucide/vue";
 import type { TaskCleanupItem } from "../types";
 
 defineProps<{

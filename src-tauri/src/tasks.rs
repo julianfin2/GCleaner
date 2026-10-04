@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use tauri::{AppHandle, Emitter};
 use url::Url;
 
-use crate::auth::{parse_google_response, send_with_retry};
+use crate::auth::{api_path_segment, google_client, parse_google_response, send_with_retry};
 use crate::models::{FileActionStatusPayload, TaskCleanupItem};
 use crate::tokens::get_valid_access_token;
 
@@ -19,7 +19,7 @@ pub async fn scan_task_cleanup_items(
     account: String,
     tokens_dir: PathBuf,
 ) -> anyhow::Result<Vec<TaskCleanupItem>> {
-    let client = reqwest::Client::new();
+    let client = google_client()?;
     let token = get_valid_access_token(&tokens_dir, &account)?;
     let default_list = get_default_task_list(&client, &token.access_token).await?;
     let task_lists = list_task_lists(&client, &token.access_token).await?;
@@ -169,7 +169,7 @@ async fn list_tasks_page(
 ) -> anyhow::Result<serde_json::Value> {
     let mut url = Url::parse(&format!(
         "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks",
-        task_list_id
+        api_path_segment(task_list_id)?
     ))?;
     url.query_pairs_mut()
         .append_pair("maxResults", "100")
@@ -190,7 +190,7 @@ async fn delete_task_list(
 ) -> anyhow::Result<()> {
     let url = format!(
         "https://tasks.googleapis.com/tasks/v1/users/@me/lists/{}",
-        task_list_id
+        api_path_segment(task_list_id)?
     );
     send_delete_with_retry(client, &url, access_token, "Tasks API 删除任务列表失败").await
 }
@@ -203,7 +203,8 @@ async fn delete_task(
 ) -> anyhow::Result<()> {
     let url = format!(
         "https://tasks.googleapis.com/tasks/v1/lists/{}/tasks/{}",
-        task_list_id, task_id
+        api_path_segment(task_list_id)?,
+        api_path_segment(task_id)?
     );
     send_delete_with_retry(client, &url, access_token, "Tasks API 删除任务失败").await
 }
@@ -232,7 +233,7 @@ async fn send_delete_with_retry(
                     break;
                 }
             }
-            Err(e) => last_error = Some(e.into()),
+            Err(e) => last_error = Some(e.without_url().into()),
         }
         tokio::time::sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
     }

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckCircle2, Clock3, Loader2, Trash2 } from "lucide-vue-next";
+import { CheckCircle2, Clock3, Loader2, Trash2 } from "@lucide/vue";
 import type { AuthorizedAccount } from "../types";
 
 defineProps<{
@@ -32,6 +32,9 @@ defineEmits<{
         <p>每行粘贴一个 Google access token。token 通常 1 小时有效，过期后需要重新导入。</p>
         <textarea
           class="token-input mt-4"
+          autocomplete="off"
+          autocapitalize="off"
+          :spellcheck="false"
           :value="accessTokensText"
           :disabled="isImportingTokens"
           placeholder="ya29..."

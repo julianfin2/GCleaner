@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use tauri::{AppHandle, Emitter};
 use url::Url;
 
-use crate::auth::{parse_google_response, send_with_retry};
+use crate::auth::{api_resource_name, google_client, parse_google_response, send_with_retry};
 use crate::models::{ContactGroupItem, ContactItem, FileActionStatusPayload};
 use crate::tokens::get_valid_access_token;
 
@@ -13,7 +13,7 @@ pub async fn scan_contacts(
     account: String,
     tokens_dir: PathBuf,
 ) -> anyhow::Result<Vec<ContactItem>> {
-    let client = reqwest::Client::new();
+    let client = google_client()?;
     let token = get_valid_access_token(&tokens_dir, &account)?;
     let mut contacts = Vec::new();
     let mut page_token: Option<String> = None;
@@ -61,7 +61,7 @@ pub async fn scan_contact_groups(
     account: String,
     tokens_dir: PathBuf,
 ) -> anyhow::Result<Vec<ContactGroupItem>> {
-    let client = reqwest::Client::new();
+    let client = google_client()?;
     let token = get_valid_access_token(&tokens_dir, &account)?;
     let mut groups = Vec::new();
     let mut page_token: Option<String> = None;
@@ -119,6 +119,9 @@ pub async fn delete_contacts_batch(
     resource_names: &[String],
     access_token: &str,
 ) -> anyhow::Result<()> {
+    for name in resource_names {
+        api_resource_name(name, "people")?;
+    }
     let url = "https://people.googleapis.com/v1/people:batchDeleteContacts";
     let mut last_error = None;
     for attempt in 0..3 {
@@ -144,7 +147,7 @@ pub async fn delete_contacts_batch(
                     break;
                 }
             }
-            Err(e) => last_error = Some(e.into()),
+            Err(e) => last_error = Some(e.without_url().into()),
         }
         tokio::time::sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
     }
@@ -159,7 +162,7 @@ pub async fn delete_contact_group(
 ) -> anyhow::Result<()> {
     let url = format!(
         "https://people.googleapis.com/v1/{}",
-        group.resource_name.trim_start_matches('/')
+        api_resource_name(&group.resource_name, "contactGroups")?
     );
     let mut last_error = None;
     for attempt in 0..3 {
@@ -185,7 +188,7 @@ pub async fn delete_contact_group(
                     break;
                 }
             }
-            Err(e) => last_error = Some(e.into()),
+            Err(e) => last_error = Some(e.without_url().into()),
         }
         tokio::time::sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
     }

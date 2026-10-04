@@ -5,7 +5,7 @@ use anyhow::anyhow;
 use tauri::{AppHandle, Emitter};
 use url::Url;
 
-use crate::auth::{parse_google_response, send_with_retry};
+use crate::auth::{api_path_segment, google_client, parse_google_response, send_with_retry};
 use crate::models::{DriveFile, FileActionStatusPayload, SharedDriveFile, SharedPermission};
 use crate::tokens::get_valid_access_token;
 
@@ -13,7 +13,7 @@ pub async fn scan_owned_top_level(
     account: String,
     tokens_dir: PathBuf,
 ) -> anyhow::Result<Vec<DriveFile>> {
-    let client = reqwest::Client::new();
+    let client = google_client()?;
     let token = get_valid_access_token(&tokens_dir, &account)?;
     let mut files_to_delete = Vec::new();
     let mut page_token: Option<String> = None;
@@ -64,7 +64,7 @@ pub async fn scan_shared_account(
     account: String,
     tokens_dir: PathBuf,
 ) -> anyhow::Result<Vec<SharedDriveFile>> {
-    let client = reqwest::Client::new();
+    let client = google_client()?;
     let token = get_valid_access_token(&tokens_dir, &account)?;
     let mut shared_files = Vec::new();
     let mut page_token: Option<String> = None;
@@ -164,11 +164,51 @@ pub async fn remove_shared_permission(
     file: &SharedDriveFile,
     access_token: &str,
 ) -> anyhow::Result<()> {
+    remove_account_permission(
+        client,
+        &file.id,
+        &file.permission_id,
+        access_token,
+        &file.account,
+    )
+    .await
+}
+
+pub async fn remove_account_permission(
+    client: &reqwest::Client,
+    file_id: &str,
+    permission_id: &str,
+    access_token: &str,
+    account: &str,
+) -> anyhow::Result<()> {
     let url = format!(
         "https://www.googleapis.com/drive/v3/files/{}/permissions/{}",
-        file.id, file.permission_id
+        api_path_segment(file_id)?,
+        api_path_segment(permission_id)?
     );
+    let body = send_with_retry(|| {
+        client
+            .get(&url)
+            .bearer_auth(access_token)
+            .query(&[("fields", "id,type,role,emailAddress")])
+    })
+    .await?;
+    let permission: SharedPermission = serde_json::from_value(body)?;
+    if !is_removable_account_permission(&permission, account, permission_id) {
+        return Err(anyhow!("只能移除当前账号的直接非所有者权限"));
+    }
     send_delete_with_retry(client, &url, access_token).await
+}
+
+fn is_removable_account_permission(permission: &SharedPermission, account: &str, id: &str) -> bool {
+    permission.id == id
+        && permission.p_type == "user"
+        && !permission.role.is_empty()
+        && permission.role != "owner"
+        && permission
+            .email_address
+            .as_deref()
+            .is_some_and(|email| email.eq_ignore_ascii_case(account))
 }
 
 pub fn emit_file_status(app_handle: &AppHandle, file: &DriveFile, status: &str) {
@@ -202,7 +242,10 @@ async fn permanently_delete_file_with_retry(
     file_id: &str,
     access_token: &str,
 ) -> anyhow::Result<()> {
-    let url = format!("https://www.googleapis.com/drive/v3/files/{}", file_id);
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files/{}",
+        api_path_segment(file_id)?
+    );
     send_delete_with_retry(client, &url, access_token).await
 }
 
@@ -211,7 +254,10 @@ async fn trash_file_with_retry(
     file_id: &str,
     access_token: &str,
 ) -> anyhow::Result<()> {
-    let url = format!("https://www.googleapis.com/drive/v3/files/{}", file_id);
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files/{}",
+        api_path_segment(file_id)?
+    );
     let mut last_error = None;
     for attempt in 0..3 {
         match client
@@ -236,7 +282,7 @@ async fn trash_file_with_retry(
                     break;
                 }
             }
-            Err(e) => last_error = Some(e.into()),
+            Err(e) => last_error = Some(e.without_url().into()),
         }
         tokio::time::sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
     }
@@ -267,10 +313,52 @@ async fn send_delete_with_retry(
                     break;
                 }
             }
-            Err(e) => last_error = Some(e.into()),
+            Err(e) => last_error = Some(e.without_url().into()),
         }
         tokio::time::sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
     }
 
     Err(last_error.unwrap_or_else(|| anyhow!("Google API 删除请求失败")))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn reject_foreign_or_owner_permissions() {
+        let mut permission = SharedPermission {
+            id: "123".into(),
+            p_type: "user".into(),
+            role: "reader".into(),
+            email_address: Some("me@example.com".into()),
+        };
+        assert!(is_removable_account_permission(
+            &permission,
+            "ME@example.com",
+            "123"
+        ));
+        assert!(!is_removable_account_permission(
+            &permission,
+            "other@example.com",
+            "123"
+        ));
+        assert!(!is_removable_account_permission(
+            &permission,
+            "me@example.com",
+            "456"
+        ));
+        permission.role = "owner".into();
+        assert!(!is_removable_account_permission(
+            &permission,
+            "me@example.com",
+            "123"
+        ));
+        permission.role = "reader".into();
+        permission.p_type = "group".into();
+        assert!(!is_removable_account_permission(
+            &permission,
+            "me@example.com",
+            "123"
+        ));
+    }
 }

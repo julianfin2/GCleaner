@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { AlertTriangle, X } from "lucide-vue-next";
+import { AlertTriangle, X } from "@lucide/vue";
 
 defineProps<{
   open: boolean;

@@ -6,7 +6,8 @@ use anyhow::anyhow;
 use tauri::{AppHandle, Emitter};
 use url::Url;
 
-use crate::auth::{parse_google_response, send_with_retry};
+use crate::auth::{api_path_segment, google_client, parse_google_response, send_with_retry};
+use crate::drive::remove_account_permission;
 use crate::models::{
     FileActionStatusPayload, MailCleanupCandidate, MailDriveFile, SharedPermission,
 };
@@ -23,7 +24,7 @@ pub async fn scan_mail_cleanup_candidates(
     tokens_dir: PathBuf,
     query: String,
 ) -> anyhow::Result<Vec<MailCleanupCandidate>> {
-    let client = reqwest::Client::new();
+    let client = google_client()?;
     let token = get_valid_access_token(&tokens_dir, &account)?;
     let mut candidates = Vec::new();
     let mut page_token: Option<String> = None;
@@ -102,11 +103,15 @@ pub async fn process_mail_cleanup_candidate(
             continue;
         };
 
-        let url = format!(
-            "https://www.googleapis.com/drive/v3/files/{}/permissions/{}",
-            file.id, permission_id
-        );
-        match delete_with_retry(client, &url, access_token, "Drive 权限移除失败").await {
+        match remove_account_permission(
+            client,
+            &file.id,
+            permission_id,
+            access_token,
+            &candidate.account,
+        )
+        .await
+        {
             Ok(()) => removed_permissions += 1,
             Err(_) => failed_permissions += 1,
         }
@@ -140,7 +145,7 @@ async fn get_gmail_message(
 ) -> anyhow::Result<serde_json::Value> {
     let url = format!(
         "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
-        message_id
+        api_path_segment(message_id)?
     );
     let body = send_with_retry(|| {
         client
@@ -178,7 +183,10 @@ async fn get_drive_file(
     access_token: &str,
     link: &DriveLink,
 ) -> anyhow::Result<serde_json::Value> {
-    let url = format!("https://www.googleapis.com/drive/v3/files/{}", link.id);
+    let url = format!(
+        "https://www.googleapis.com/drive/v3/files/{}",
+        api_path_segment(&link.id)?
+    );
     let mut request = client
         .get(&url)
         .bearer_auth(access_token)
@@ -192,7 +200,8 @@ async fn get_drive_file(
     if let Some(resource_key) = link.resource_key.as_deref() {
         request = request.query(&[("resourceKey", resource_key)]);
     }
-    let body = parse_google_response(request.send().await?).await?;
+    let body =
+        parse_google_response(request.send().await.map_err(reqwest::Error::without_url)?).await?;
     Ok(body)
 }
 
@@ -339,57 +348,59 @@ fn split_possible_urls(text: &str) -> Vec<String> {
 }
 
 fn parse_drive_link(raw: &str) -> Option<DriveLink> {
-    let decoded = urlencoding::decode(raw).ok()?.to_string();
-    let url = Url::parse(&decoded).ok()?;
-    let host = url.host_str()?.to_ascii_lowercase();
+    parse_drive_link_at_depth(raw, 0)
+}
+
+fn parse_drive_link_at_depth(raw: &str, depth: usize) -> Option<DriveLink> {
+    if depth > 5 || raw.len() > 8192 {
+        return None;
+    }
+    let url = Url::parse(raw).ok().or_else(|| {
+        let decoded = urlencoding::decode(raw).ok()?;
+        Url::parse(&decoded).ok()
+    })?;
+    if url.scheme() != "https" || !url.username().is_empty() || url.password().is_some() {
+        return None;
+    }
+    let host = url.host_str()?;
     let path_segments: Vec<_> = url.path_segments()?.collect();
     let query: HashMap<_, _> = url.query_pairs().into_owned().collect();
     let resource_key = query.get("resourcekey").cloned();
 
     if (host == "www.google.com" || host == "google.com") && path_segments.first() == Some(&"url") {
         if let Some(target) = query.get("q").or_else(|| query.get("url")) {
-            return parse_drive_link(target);
+            return parse_drive_link_at_depth(target, depth + 1);
         }
     }
 
-    if host == "drive.google.com" {
+    let id = if host == "drive.google.com" {
         if let Some(id) = query.get("id") {
-            return Some(DriveLink {
-                id: clean_drive_id(id),
-                resource_key,
-            });
-        }
-
-        if path_segments.len() >= 3 && path_segments[0] == "file" && path_segments[1] == "d" {
-            return Some(DriveLink {
-                id: clean_drive_id(path_segments[2]),
-                resource_key,
-            });
-        }
-
-        if path_segments.len() >= 3 && path_segments[0] == "drive" && path_segments[1] == "folders"
+            id.as_str()
+        } else if path_segments.len() >= 3
+            && ((path_segments[0] == "file" && path_segments[1] == "d")
+                || (path_segments[0] == "drive" && path_segments[1] == "folders"))
         {
-            return Some(DriveLink {
-                id: clean_drive_id(path_segments[2]),
-                resource_key,
-            });
+            path_segments[2]
+        } else {
+            return None;
         }
+    } else if host == "docs.google.com" && path_segments.len() >= 3 && path_segments[1] == "d" {
+        path_segments[2]
+    } else {
+        return None;
+    };
+    if id.is_empty()
+        || id.len() > 256
+        || !id
+            .bytes()
+            .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-'))
+    {
+        return None;
     }
-
-    if host.ends_with("docs.google.com") && path_segments.len() >= 3 && path_segments[1] == "d" {
-        return Some(DriveLink {
-            id: clean_drive_id(path_segments[2]),
-            resource_key,
-        });
-    }
-
-    None
-}
-
-fn clean_drive_id(value: &str) -> String {
-    value
-        .trim_matches(|c: char| !c.is_ascii_alphanumeric() && c != '_' && c != '-')
-        .to_string()
+    Some(DriveLink {
+        id: id.to_string(),
+        resource_key,
+    })
 }
 
 fn header_value(message: &serde_json::Value, name: &str) -> Option<String> {
@@ -439,13 +450,13 @@ async fn delete_mail(
     if permanently_delete {
         let url = format!(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}",
-            message_id
+            api_path_segment(message_id)?
         );
         delete_with_retry(client, &url, access_token, "Gmail 永久删除失败").await
     } else {
         let url = format!(
             "https://gmail.googleapis.com/gmail/v1/users/me/messages/{}/trash",
-            message_id
+            api_path_segment(message_id)?
         );
         move_mail_to_trash(client, &url, access_token).await
     }
@@ -481,7 +492,7 @@ async fn move_mail_to_trash(
                     break;
                 }
             }
-            Err(e) => last_error = Some(e.into()),
+            Err(e) => last_error = Some(e.without_url().into()),
         }
         tokio::time::sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
     }
@@ -513,10 +524,57 @@ async fn delete_with_retry(
                     break;
                 }
             }
-            Err(e) => last_error = Some(e.into()),
+            Err(e) => last_error = Some(e.without_url().into()),
         }
         tokio::time::sleep(Duration::from_millis(400 * (attempt + 1) as u64)).await;
     }
 
     Err(last_error.unwrap_or_else(|| anyhow!("{}", label)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reject_untrusted_drive_links() {
+        for link in [
+            "https://evildocs.google.com/document/d/abc/edit",
+            "https://docs.google.com.evil.example/document/d/abc/edit",
+            "https://drive.google.com/open?id=a%2Fb",
+            "https://drive.google.com/open?id=a%3Ffields%3Dpermissions",
+            "https://drive.google.com/open?id=",
+            "https://drive.google.com/file/d/a%2Fb/view",
+            "https://user@drive.google.com/file/d/abc/view",
+        ] {
+            assert!(parse_drive_link(link).is_none(), "{link}");
+        }
+    }
+
+    #[test]
+    fn accept_official_drive_links_and_limit_redirect_depth() {
+        for link in [
+            "https://docs.google.com/document/d/abc-_123/edit",
+            "https://drive.google.com/file/d/abc-_123/view",
+            "https://drive.google.com/drive/folders/abc-_123",
+            "https://drive.google.com/open?id=abc-_123",
+        ] {
+            assert_eq!(parse_drive_link(link).unwrap().id, "abc-_123");
+        }
+        let mut link = "https://drive.google.com/open?id=abc-_123&resourcekey=key".to_string();
+        link = format!(
+            "https://www.google.com/url?q={}",
+            urlencoding::encode(&link)
+        );
+        let parsed = parse_drive_link(&link).unwrap();
+        assert_eq!(parsed.id, "abc-_123");
+        assert_eq!(parsed.resource_key.as_deref(), Some("key"));
+        for _ in 0..6 {
+            link = format!(
+                "https://www.google.com/url?q={}",
+                urlencoding::encode(&link)
+            );
+        }
+        assert!(parse_drive_link(&link).is_none());
+    }
 }

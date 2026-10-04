@@ -12,7 +12,7 @@ import {
   RefreshCw, 
   Share2,
   Users
-} from "lucide-vue-next";
+} from "@lucide/vue";
 import AccountsView from "./components/AccountsView.vue";
 import ConfirmDialog from "./components/ConfirmDialog.vue";
 import ContactsCleanupView from "./components/ContactsCleanupView.vue";

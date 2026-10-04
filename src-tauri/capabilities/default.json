@@ -2,9 +2,27 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
   "description": "Capability for the main window",
-  "windows": ["main"],
+  "windows": [
+    "main"
+  ],
   "permissions": [
-    "core:default",
-    "opener:default"
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-import-tokens",
+    "allow-get-authorized-accounts",
+    "allow-delete-authorized-account",
+    "allow-clear-authorized-accounts",
+    "allow-scan-drive",
+    "allow-delete-files",
+    "allow-scan-shared-drive",
+    "allow-remove-shared-permissions",
+    "allow-scan-mail-cleanup",
+    "allow-cleanup-mail-candidates",
+    "allow-scan-contacts-cleanup",
+    "allow-scan-contact-groups-cleanup",
+    "allow-delete-contacts-cleanup",
+    "allow-delete-contact-groups-cleanup",
+    "allow-scan-tasks-cleanup",
+    "allow-cleanup-tasks"
   ]
 }

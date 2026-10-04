@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckCircle2, Loader2, RefreshCw, ShieldAlert, Tags, Trash2, Users } from "lucide-vue-next";
+import { CheckCircle2, Loader2, RefreshCw, ShieldAlert, Tags, Trash2, Users } from "@lucide/vue";
 import type { ContactGroupItem, ContactItem } from "../types";
 
 defineProps<{

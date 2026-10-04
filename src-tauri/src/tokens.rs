@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 
 use anyhow::{anyhow, Context};
 
-use crate::auth::parse_google_response;
+use crate::auth::{google_client, parse_google_response};
 use crate::models::{AuthToken, AuthorizedAccount, TokenImportFailure, TokenImportReport};
 
 pub fn token_path(tokens_dir: &Path, account: &str) -> PathBuf {
@@ -15,6 +15,22 @@ pub fn validate_account_name(account: &str) -> anyhow::Result<()> {
         || account.contains('/')
         || account.contains('\\')
         || account.contains("..")
+        || account
+            .chars()
+            .any(|c| c.is_control() || "<>:\"|?*".contains(c))
+        || account.ends_with(['.', ' '])
+    {
+        return Err(anyhow!("账号名称无效"));
+    }
+    let basename = account
+        .split('.')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_uppercase();
+    if ["CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$"].contains(&basename.as_str())
+        || (basename.len() == 4
+            && (basename.starts_with("COM") || basename.starts_with("LPT"))
+            && matches!(basename.as_bytes()[3], b'1'..=b'9'))
     {
         return Err(anyhow!("账号名称无效"));
     }
@@ -34,6 +50,7 @@ pub fn write_token(tokens_dir: &Path, token: &AuthToken) -> anyhow::Result<()> {
         .email
         .as_deref()
         .ok_or_else(|| anyhow!("token 中没有 email，无法保存账号文件"))?;
+    validate_account_name(email)?;
     fs::create_dir_all(tokens_dir)?;
     fs::write(
         token_path(tokens_dir, email),
@@ -46,7 +63,7 @@ pub async fn import_access_tokens(
     tokens_dir: &Path,
     raw_tokens: Vec<String>,
 ) -> anyhow::Result<TokenImportReport> {
-    let client = reqwest::Client::new();
+    let client = google_client()?;
     let mut imported = Vec::new();
     let mut failures = Vec::new();
 
@@ -149,7 +166,8 @@ async fn inspect_access_token(
             .get("https://oauth2.googleapis.com/tokeninfo")
             .query(&[("access_token", access_token)])
             .send()
-            .await?,
+            .await
+            .map_err(reqwest::Error::without_url)?,
     )
     .await?;
 
@@ -192,22 +210,7 @@ async fn inspect_access_token(
 }
 
 fn token_preview(access_token: &str) -> String {
-    let token = access_token.trim();
-    let length = token.chars().count();
-    let start: String = token.chars().take(8).collect();
-    let end: String = token
-        .chars()
-        .rev()
-        .take(4)
-        .collect::<Vec<_>>()
-        .into_iter()
-        .rev()
-        .collect();
-    if length > 16 {
-        format!("{}...{}（{}字符）", start, end, length)
-    } else {
-        format!("{}（{}字符）", token, length)
-    }
+    format!("[已隐藏]（{}字符）", access_token.trim().chars().count())
 }
 
 async fn get_userinfo_email(
@@ -219,7 +222,8 @@ async fn get_userinfo_email(
             .get("https://www.googleapis.com/oauth2/v2/userinfo")
             .bearer_auth(access_token)
             .send()
-            .await?,
+            .await
+            .map_err(reqwest::Error::without_url)?,
     )
     .await?;
     body["email"]
@@ -237,7 +241,8 @@ async fn get_gmail_profile_email(
             .get("https://gmail.googleapis.com/gmail/v1/users/me/profile")
             .bearer_auth(access_token)
             .send()
-            .await?,
+            .await
+            .map_err(reqwest::Error::without_url)?,
     )
     .await?;
     body["emailAddress"]
@@ -256,7 +261,8 @@ async fn get_drive_about_email(
             .bearer_auth(access_token)
             .query(&[("fields", "user(emailAddress)")])
             .send()
-            .await?,
+            .await
+            .map_err(reqwest::Error::without_url)?,
     )
     .await?;
     body["user"]["emailAddress"]
@@ -270,4 +276,29 @@ fn is_token_expired(token: &AuthToken) -> bool {
         .expiry_date
         .map(|expiry| expiry <= chrono::Utc::now().timestamp() + 30)
         .unwrap_or(false)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reject_unsafe_account_paths() {
+        for account in [
+            "", "../test", "a/b", "a\\b", "a:stream", "a?b", "a*b", "a\n", "test.", "test ", "CON",
+            "LPT1", "nul.txt",
+        ] {
+            assert!(validate_account_name(account).is_err(), "{account:?}");
+        }
+        assert!(validate_account_name("test+label@example.com").is_ok());
+    }
+
+    #[test]
+    fn never_include_token_in_preview() {
+        assert_eq!(token_preview("short-secret"), "[已隐藏]（12字符）");
+        assert_eq!(
+            token_preview("ya29.long-secret-value"),
+            "[已隐藏]（22字符）"
+        );
+    }
 }

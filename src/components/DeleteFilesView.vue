@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckCircle2, FileText, Loader2, RefreshCw, ShieldAlert, Trash2 } from "lucide-vue-next";
+import { CheckCircle2, FileText, Loader2, RefreshCw, ShieldAlert, Trash2 } from "@lucide/vue";
 import type { DeleteMode, DriveFile } from "../types";
 
 defineProps<{

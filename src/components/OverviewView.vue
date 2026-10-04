@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { CheckCircle2, Loader2, Play, RefreshCw, ShieldAlert } from "lucide-vue-next";
+import { CheckCircle2, Loader2, Play, RefreshCw, ShieldAlert } from "@lucide/vue";
 
 export interface OverviewRow {
   key: string;
